@@ -1,0 +1,1 @@
+"""Dimensional consistency checker package."""

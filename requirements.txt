@@ -1,0 +1,5 @@
+anthropic
+sympy
+python-dotenv
+tqdm
+pytest
