@@ -158,7 +158,11 @@ def term_dimension(term: str, symbol_dims: Mapping[str, Dimension]) -> Dimension
     if the term cannot be reduced to a single monomial in the base
     dimensions (for example if it contains an additive sub-expression).
     """
-    expr = sp.sympify(term, evaluate=True)
+    # Bind every known symbol name to a plain sympy Symbol so that names which
+    # collide with sympy built-ins (E for Euler's number, I for the imaginary
+    # unit, etc.) are treated as physical symbols rather than constants.
+    local_syms = {name: sp.Symbol(name) for name in symbol_dims}
+    expr = sp.sympify(term, locals=local_syms, evaluate=True)
 
     # Expand so that, e.g., (a*b)**2 becomes a**2 * b**2 for extraction.
     expr = sp.expand_power_base(sp.powsimp(expr, force=True), force=True)

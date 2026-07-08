@@ -70,52 +70,74 @@ pytest -q
 
 ## Results
 
-Numbers below are produced by running the commands above; this repo ships the
-code, run it to populate them.
+Measured on a Windows workstation, CPU only (no GPU, no torch). The symbolic
+checker was exercised for real; the live LLM parse path was not, because no
+`ANTHROPIC_API_KEY` was configured in this environment (see the note below).
 
-Reproduction:
+**Tests.** `pytest -q` passes **14/14** tests in about 0.25 s with no network
+calls. These cover the exact-`Fraction` dimension algebra (multiply, divide,
+power, dimensionless equality), `term_dimension` on real terms including the
+`1/2*m*v**2` numeric-factor case, the consistency check and suggester on
+hand-built symbol tables, and the LLM parse path through a mocked Anthropic
+client (valid JSON, an inconsistent equation, malformed JSON, and an unknown
+base dimension both surfaced as a single `ParseError`).
 
-```bash
-pytest -q
-python scripts/run_check.py --equation "F = m*a"
-python scripts/run_check.py --equation "x = v"
-```
+**Symbolic checker, run directly on structured inputs** (no API key needed,
+via `src.pipeline.analyze_parsed`):
 
-Expected behavior:
-
-- `pytest -q` passes with no API calls. The dimension algebra, the
-  consistency check, and the suggester are exercised on hand-built inputs, and
-  the LLM parse path is exercised through a mocked client.
-- A dimensionally correct equation (`F = m*a`, `E = m*c^2`) reports
-  `CONSISTENT` and lists every term with the same dimension. `F = m*a` should
-  show each term as `M L T^-2`; `E = m*c^2` should show each term as
-  `M L^2 T^-2`.
-- A wrong equation such as `x = v` (position equals velocity) reports
-  `INCONSISTENT`. The velocity term is flagged as the outlier and the
-  suggestion notes that multiplying by a time (dimension `T`) would restore
-  consistency, since velocity times time is a length.
-- A missing dimensionless factor is never flagged: `E = m*v**2` and
-  `E = 1/2*m*v**2` are both reported `CONSISTENT` because the `1/2` does not
-  change any dimension.
-
-Worked example (`x = v`):
+`F = m*a` (Newton's second law) is reported CONSISTENT, every term `M L T^-2`:
 
 ```
-Equation: x = v
-Parsed as: x = v
+Per-term dimensions:
+                     F  ->  M L T^-2
+                   m*a  ->  M L T^-2
+CONSISTENT: every term has dimension M L T^-2
+```
 
+`E = m*c**2` is reported CONSISTENT, every term `M L^2 T^-2`:
+
+```
+Per-term dimensions:
+                     E  ->  M L^2 T^-2
+                m*c**2  ->  M L^2 T^-2
+CONSISTENT: every term has dimension M L^2 T^-2
+```
+
+`x = v` (position set equal to velocity) is reported INCONSISTENT. The velocity
+term is flagged as the outlier and the suggester computes the missing factor
+(expected / actual = `T`), i.e. multiply by a time to restore a length:
+
+```
 Per-term dimensions:
                      x  ->  L
                      v  ->  L T^-1
-
 INCONSISTENT: expected dimension is L
   outlier term 'v' has dimension L T^-1; to fix, multiply by a quantity with
   dimension time (missing factor dimension: T)
 ```
 
-The exact parsed dimensions depend on the LLM's reading of each symbol; the
-consistency verdict and the suggestion are computed deterministically from that
-parse.
+A missing dimensionless factor is never flagged: with the same symbol table,
+`E = m*v**2` and `E = 1/2*m*v**2` are both CONSISTENT, because the `1/2` drops
+out as dimensionless.
+
+Reproduce:
+
+```bash
+pytest -q
+python -c "from src.llm_parse import ParsedEquation; from src.pipeline import analyze_parsed, format_report; \
+print(format_report(analyze_parsed('x = v', ParsedEquation(symbols={'x':{'length':1},'v':{'length':1,'time':-1}}, lhs=['x'], rhs=['v']))))"
+```
+
+## Note on the LLM parse step
+
+The text/LaTeX -> structured-JSON parse is done by Claude and needs
+`ANTHROPIC_API_KEY`. That key was **not** configured in the environment used
+for these results, so the end-to-end `scripts/run_check.py --equation "..."`
+path (text in, verdict out) was not exercised here; without a key it exits
+cleanly with `error: ANTHROPIC_API_KEY is not set`. Everything downstream of the
+parse - the dimension algebra, the sympy term reduction, the consistency check,
+and the fix suggester - is deterministic and was run for real on the structured
+inputs shown above. No LLM output is reported or invented in this README.
 
 ## What I'd do next at larger scale
 
